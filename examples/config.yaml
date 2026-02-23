@@ -1,5 +1,17 @@
 # Semantic Claw Router — Example Configuration
 # Routes between local Qwen3-Coder-Next (vLLM on OpenShift) and Google Gemini
+#
+# Before running, set environment variables:
+#
+#   # Option 1: Source from OpenShift cluster secret
+#   export GEMINI_API_KEY=$(oc get secret gemini-api-key -n aiops-harness \
+#       -o jsonpath='{.data.GEMINI_API_KEY}' | base64 -d)
+#   export VLLM_ENDPOINT=$(oc get route qwen3-coder-next -n llm-serving \
+#       -o jsonpath='https://{.spec.host}')
+#
+#   # Option 2: Set directly
+#   export GEMINI_API_KEY="your-google-ai-studio-key"
+#   export VLLM_ENDPOINT="https://your-vllm-host.example.com"
 
 host: "0.0.0.0"
 port: 8080
@@ -9,7 +21,7 @@ request_timeout: 120.0
 models:
   - name: "qwen3-coder-next"
     provider: "vllm"
-    endpoint: "https://qwen3-coder-next-llm-serving.instructlab-ai-7407a08c5ee477a3d3ffccce3a9f8665-0000.eu-gb.containers.appdomain.cloud"
+    endpoint: "${VLLM_ENDPOINT}"
     context_window: 32768
     cost_per_million_input: 0.0    # Self-hosted, no per-token cost
     cost_per_million_output: 0.0
@@ -19,7 +31,7 @@ models:
   - name: "gemini-2.5-flash"
     provider: "gemini"
     endpoint: "https://generativelanguage.googleapis.com/v1beta"
-    api_key: "***REMOVED***"
+    api_key: "${GEMINI_API_KEY}"
     context_window: 1048576
     cost_per_million_input: 0.15
     cost_per_million_output: 0.60

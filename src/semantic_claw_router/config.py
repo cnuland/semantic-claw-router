@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -91,6 +93,20 @@ class ObservabilityConfig:
     metrics_enabled: bool = True
 
 
+_ENV_VAR_RE = re.compile(r"\$\{([^}]+)\}")
+
+
+def _expand_env_vars(text: str) -> str:
+    """Expand ``${VAR}`` and ``${VAR:-default}`` in a string."""
+    def _replace(match: re.Match) -> str:
+        expr = match.group(1)
+        if ":-" in expr:
+            var, default = expr.split(":-", 1)
+            return os.environ.get(var, default)
+        return os.environ.get(expr, match.group(0))
+    return _ENV_VAR_RE.sub(_replace, text)
+
+
 @dataclass
 class RouterConfig:
     """Top-level router configuration."""
@@ -109,9 +125,15 @@ class RouterConfig:
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> RouterConfig:
-        """Load configuration from a YAML file."""
+        """Load configuration from a YAML file.
+
+        Supports ``${VAR}`` and ``${VAR:-default}`` syntax in string values,
+        resolved from environment variables at load time.
+        """
         with open(path) as f:
-            data = yaml.safe_load(f)
+            raw = f.read()
+        raw = _expand_env_vars(raw)
+        data = yaml.safe_load(raw)
         return cls._from_dict(data)
 
     @classmethod

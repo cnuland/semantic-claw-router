@@ -1,14 +1,17 @@
 """Integration tests against live endpoints.
 
 These tests require:
-- Qwen3 model running on OpenShift
-- Gemini API key configured
+- A vLLM-compatible model endpoint (set VLLM_ENDPOINT env var)
+- Gemini API key configured (set GEMINI_API_KEY env var)
 
-Run with: pytest tests/test_integration.py -m integration
+Run with:
+    VLLM_ENDPOINT=https://your-vllm-host GEMINI_API_KEY=your-key \
+        pytest tests/test_integration.py -m integration
 """
 
 import asyncio
 import json
+import os
 
 import pytest
 
@@ -19,12 +22,13 @@ from semantic_claw_router.providers.gemini import GeminiProvider
 from semantic_claw_router.server import SemanticRouter
 
 
-QWEN_ENDPOINT = (
-    "https://qwen3-coder-next-llm-serving"
-    ".instructlab-ai-7407a08c5ee477a3d3ffccce3a9f8665-0000"
-    ".eu-gb.containers.appdomain.cloud"
+QWEN_ENDPOINT = os.environ.get("VLLM_ENDPOINT", "")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+
+pytestmark = pytest.mark.skipif(
+    not QWEN_ENDPOINT or not GEMINI_API_KEY,
+    reason="VLLM_ENDPOINT and GEMINI_API_KEY env vars required for integration tests",
 )
-GEMINI_API_KEY = "***REMOVED***"
 
 
 def _make_config() -> RouterConfig:
