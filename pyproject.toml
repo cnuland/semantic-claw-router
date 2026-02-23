@@ -22,6 +22,10 @@ dev = [
     "pytest-cov>=5.0",
     "ruff>=0.5.0",
 ]
+semantic = [
+    "sentence-transformers>=3.0.0",
+    "numpy>=1.24.0",
+]
 
 [project.scripts]
 semantic-claw-router = "semantic_claw_router.cli:main"
@@ -32,6 +36,7 @@ asyncio_mode = "auto"
 markers = [
     "integration: marks tests requiring live endpoints",
     "benchmark: marks benchmark tests",
+    "semantic: marks tests requiring sentence-transformers",
 ]
 
 [tool.ruff]

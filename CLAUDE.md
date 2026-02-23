@@ -32,6 +32,7 @@ Read `docs/pipeline.md` for the full 9-stage pipeline and 15-dimension classifie
 | YAML config + dataclasses | `src/semantic_claw_router/config.py` |
 | Core types (tiers, backends) | `src/semantic_claw_router/router/types.py` |
 | 15-dim fast-path classifier | `src/semantic_claw_router/router/fastpath.py` |
+| Semantic embedding classifier | `src/semantic_claw_router/router/semantic.py` |
 | Decision engine (tier → model) | `src/semantic_claw_router/router/decision.py` |
 | Request deduplication | `src/semantic_claw_router/pipeline/dedup.py` |
 | Session pinning | `src/semantic_claw_router/pipeline/session.py` |

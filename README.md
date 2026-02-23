@@ -42,9 +42,9 @@ This project implements the combined architecture in **Python**, validated again
   10% of requests → paid cloud API (gemini-2.5-flash)
 
   Routing overhead:  0.1 ms  (0.05% of inference time)
-  Fast-path classifier:  27–46 μs per request
-  Classification accuracy:  86% exact tier match
-  Test suite:  89 tests (80 unit + 9 integration)
+  Fast-path classifier:  27–46 μs per request (handles ~86% of requests)
+  Semantic fallback:  ~5-20 ms (handles remaining ~14% ambiguous cases)
+  Test suite:  104+ tests
 ```
 
 Only requests requiring genuine mathematical reasoning hit the paid cloud API. Everything else — definitions, code generation, debugging, documentation — routes to the free local model.
@@ -65,7 +65,7 @@ Client Applications (OpenAI-compatible API)
 │  │  1. Parse request                     │  │
 │  │  2. Dedup check (SHA-256 LRU)         │  │
 │  │  3. Session pin lookup                │  │
-│  │  4. Fast-path classify (15-dim, <1ms) │  │
+│  │  4. Classify (fast-path → semantic)    │  │
 │  │  5. Decision engine (tier → model)    │  │
 │  │  6. Context compression (>180KB)      │  │
 │  │  7. Provider routing                  │  │
@@ -150,6 +150,7 @@ Every feature traces back to its origin project.
 | Prometheus-compatible observability (p50/p99, distributions) | `observability/` |
 | Response transparency headers (`x-scr-*`) | `server.py` |
 | YAML config with env var expansion | `config.py` |
+| Semantic embedding classifier (fallback for ambiguous requests) | `router/semantic.py` |
 | CLI entrypoint | `cli.py` |
 
 ### From ClawRouter — The Brain

@@ -70,15 +70,28 @@ Against 21 diverse prompts (definition lookups, code generation, system design, 
 - Borderline cases (score near 0.3 MEDIUM/COMPLEX boundary) account for most misses
 - Production deployments would add a neural BERT classifier as a second stage for ambiguous cases
 
+## Semantic Classifier Latency
+
+When the fast-path is ambiguous, the semantic embedding classifier fires:
+
+| Metric | Measured |
+|--------|----------|
+| Model load (first request only) | ~1-3 s (downloads + loads `all-MiniLM-L6-v2`) |
+| Per-request embedding + similarity | ~5-20 ms on CPU |
+| Frequency | ~14% of requests (fast-path handles 86%) |
+
+The semantic classifier only fires for ambiguous requests. For the 86% handled by the fast-path, there is zero additional cost.
+
 ## Test Coverage
 
 | Module | Tests | What's Covered |
 |--------|-------|----------------|
 | Fast-path classifier | 24 | Tier classification, dimension scoring, confidence calibration, performance |
+| Semantic classifier | 15+ | Mocked logic, graceful degradation, config defaults, integration (real model) |
 | Decision engine | 10 | Tier routing, degradation, fallback chains, cost estimation |
 | Request dedup | 12 | Canonicalization, TTL, LRU eviction, stats |
 | Session pinning | 16 | Fingerprinting, pin/retrieve, TTL, eviction, stats |
 | Context compression | 11 | Whitespace, dedup, JSON compaction, thresholds |
 | Configuration | 6 | YAML loading, defaults, model lookup |
 | Integration (live) | 10 | vLLM provider, Gemini provider, full pipeline |
-| **Total** | **89** | |
+| **Total** | **104+** | |

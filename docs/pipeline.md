@@ -17,7 +17,7 @@ Request In ──▶ ① Parse ──▶ ② Dedup ──▶ ③ Session ──�
 | **① Parse** | Extract messages, tools, model, max_tokens from OpenAI format | Semantic Router |
 | **② Dedup** | SHA-256 hash after canonicalization; return cached if hit | ClawRouter |
 | **③ Session** | Fingerprint conversation; check for existing model pin | ClawRouter |
-| **④ Classify** | 15-dimension fast-path scorer (< 1 ms); fallback to full classify | ClawRouter |
+| **④ Classify** | 15-dimension fast-path scorer (< 1 ms); semantic embedding fallback for ambiguous cases | ClawRouter + Semantic Router |
 | **⑤ Decide** | Map tier → model, estimate cost, check context window fit | Semantic Router |
 | **⑥ Compress** | If > 180 KB: whitespace, dedup, JSON compaction | ClawRouter |
 | **⑦ Route** | Forward to selected provider (vLLM or Gemini) | Semantic Router |
@@ -54,7 +54,24 @@ Input: "What is a Python decorator?"
 
 ### Confidence gating
 
-When the weighted sum falls near a tier boundary, the sigmoid confidence drops below the threshold (0.7 by default) and the request is escalated to a full neural classifier (planned) or a conservative fallback.
+When the weighted sum falls near a tier boundary, the sigmoid confidence drops below the threshold (0.7 by default) and the request is escalated to the **semantic embedding classifier**.
+
+### Semantic Embedding Fallback
+
+When the fast-path is ambiguous (~14% of requests), the semantic classifier provides true meaning-based classification:
+
+```
+Ambiguous request → Embed with all-MiniLM-L6-v2 (22M params)
+                      → Cosine similarity to tier anchor prompts
+                      → Mean-of-top-k per tier
+                      → Highest scoring tier wins
+```
+
+The classifier uses ~6-7 pre-defined anchor prompts per tier that represent typical requests at each complexity level. New requests are embedded and compared by cosine similarity — requests semantically similar to "Prove by induction..." will route to REASONING even without the keyword "prove".
+
+**Latency**: ~5-20ms on CPU (vs. 40μs for fast-path). Only fires for ambiguous cases.
+
+**Graceful degradation**: If `sentence-transformers` is not installed, the router silently falls back to heuristic re-scoring. Install with: `pip install semantic-claw-router[semantic]`
 
 ### Reasoning override
 

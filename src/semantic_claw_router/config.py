@@ -45,6 +45,59 @@ class FastPathConfig:
 
 
 @dataclass
+class SemanticClassifierConfig:
+    """Configuration for the semantic embedding fallback classifier.
+
+    When the fast-path regex classifier is ambiguous (confidence below
+    threshold), this classifier uses sentence embeddings to compare the
+    request against pre-defined anchor prompts for each complexity tier.
+
+    Requires: ``pip install semantic-claw-router[semantic]``
+    """
+
+    enabled: bool = True
+    model_name: str = "all-MiniLM-L6-v2"
+    top_k: int = 3  # Average top-k anchor similarities per tier
+    anchors: dict[str, list[str]] = field(default_factory=lambda: {
+        "SIMPLE": [
+            "What is the capital of France?",
+            "Define photosynthesis in one sentence.",
+            "Translate 'good morning' to Spanish.",
+            "How many planets are in the solar system?",
+            "What does the acronym HTML stand for?",
+            "Convert 100 degrees Fahrenheit to Celsius.",
+        ],
+        "MEDIUM": [
+            "Write a Python function that reads a CSV file and returns the sum of a column.",
+            "Explain the difference between TCP and UDP with examples of when to use each.",
+            "Create a SQL query that joins two tables and groups results by category.",
+            "Write a bash script that finds all files larger than 100MB sorted by size.",
+            "Summarize the key concepts of object-oriented programming with an example.",
+            "Debug this JavaScript code that filters an array but returns undefined.",
+            "Write unit tests for a function that validates email addresses.",
+        ],
+        "COMPLEX": [
+            "Design a microservices architecture for an e-commerce platform with inventory, orders, and payments.",
+            "Refactor this monolithic application into modules with dependency injection and backward compatibility.",
+            "Implement a concurrent web scraper with rate limiting, retries, and database connection pooling.",
+            "Build a CI/CD pipeline for a multi-service app with staging, production, and database migrations.",
+            "Create a React component library with TypeScript including a data table with sorting and pagination.",
+            "Design a database schema for a multi-tenant SaaS app with row-level security and audit logging.",
+            "Implement authentication middleware supporting OAuth2, JWT, and API keys with RBAC.",
+        ],
+        "REASONING": [
+            "Prove by mathematical induction that the sum of 1 to n equals n(n+1)/2.",
+            "Analyze the time complexity of this recursive algorithm using the Master theorem.",
+            "Reason through the CAP theorem implications for this distributed system with network partitions.",
+            "Formally verify this sorting algorithm by establishing a loop invariant and proving termination.",
+            "Derive the gradient descent update rule for a two-layer neural network with ReLU activation.",
+            "Analyze whether this concurrent program has a potential deadlock using a resource allocation graph.",
+            "Prove that the halting problem is undecidable using proof by contradiction.",
+        ],
+    })
+
+
+@dataclass
 class DedupConfig:
     """Configuration for request deduplication."""
 
@@ -115,6 +168,9 @@ class RouterConfig:
     port: int = 8080
     models: list[ModelBackend] = field(default_factory=list)
     fast_path: FastPathConfig = field(default_factory=FastPathConfig)
+    semantic_classifier: SemanticClassifierConfig = field(
+        default_factory=SemanticClassifierConfig
+    )
     dedup: DedupConfig = field(default_factory=DedupConfig)
     session: SessionConfig = field(default_factory=SessionConfig)
     compression: CompressionConfig = field(default_factory=CompressionConfig)
@@ -168,6 +224,16 @@ class RouterConfig:
                 config.fast_path.tier_boundaries.update(fp["tier_boundaries"])
             if "tier_to_model" in fp:
                 config.fast_path.tier_to_model.update(fp["tier_to_model"])
+
+        sc = data.get("semantic_classifier", {})
+        if sc:
+            config.semantic_classifier.enabled = sc.get("enabled", True)
+            config.semantic_classifier.model_name = sc.get(
+                "model_name", "all-MiniLM-L6-v2"
+            )
+            config.semantic_classifier.top_k = sc.get("top_k", 3)
+            if "anchors" in sc:
+                config.semantic_classifier.anchors.update(sc["anchors"])
 
         dd = data.get("dedup", {})
         if dd:

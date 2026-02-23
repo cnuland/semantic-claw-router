@@ -22,6 +22,7 @@ class RoutingDecisionSource(str, Enum):
 
     FAST_PATH = "fast_path"
     FULL_CLASSIFICATION = "full_classification"
+    SEMANTIC_CLASSIFICATION = "semantic_classification"
     SESSION_PIN = "session_pin"
     DEDUP_CACHE = "dedup_cache"
     OVERRIDE = "override"

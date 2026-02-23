@@ -72,6 +72,16 @@ fast_path:
     medium: 0.3
     complex: 0.5
 
+# ── Semantic Classifier (Fallback) ──────────────────────────────────
+# When the fast-path is ambiguous, use sentence embeddings for
+# meaning-based classification.  Requires: pip install semantic-claw-router[semantic]
+# If sentence-transformers is not installed, falls back to heuristic scoring.
+semantic_classifier:
+  enabled: true
+  model_name: "all-MiniLM-L6-v2"
+  top_k: 3
+  # anchors: (uses sensible defaults — override per tier if needed)
+
 # ── Request Deduplication ─────────────────────────────────────────────
 dedup:
   enabled: true

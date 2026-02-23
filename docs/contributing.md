@@ -11,6 +11,9 @@ git clone https://github.com/cnuland/semantic-claw-router.git
 cd semantic-claw-router
 pip install -e ".[dev]"
 
+# Optional: install semantic classifier support
+pip install -e ".[dev,semantic]"
+
 # Run tests
 pytest tests/ -v
 
@@ -25,7 +28,7 @@ python examples/run_example.py
 
 - **New providers** — Add support for Anthropic, Azure, Bedrock, Ollama, etc.
 - **New classifier dimensions** — Add scoring dimensions to the fast-path classifier
-- **Neural classifiers** — Implement BERT-based classification for borderline cases
+- **Improved anchors** — Tune the semantic classifier's anchor prompts for your workload
 - **Semantic caching** — HNSW vector similarity cache for near-duplicate requests
 - **Security pipeline** — Jailbreak detection, PII redaction
 - **Kubernetes operator** — CRD-based configuration with `IntelligentPool` and `IntelligentRoute` resources
@@ -42,6 +45,7 @@ semantic-claw-router/
 │   ├── router/
 │   │   ├── types.py              # Core types (ComplexityTier, ModelBackend, ...)
 │   │   ├── fastpath.py           # 15-dimension fast-path classifier
+│   │   ├── semantic.py           # Sentence-embedding fallback classifier
 │   │   └── decision.py           # Tier → model mapping + degradation
 │   ├── pipeline/
 │   │   ├── dedup.py              # Request deduplication (SHA-256 + LRU)

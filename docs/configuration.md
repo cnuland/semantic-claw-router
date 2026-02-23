@@ -59,6 +59,38 @@ fast_path:
     complex: 0.5                  # Score > 0.5 (+ reasoning override)
 ```
 
+## Semantic Classifier (Fallback)
+
+When the fast-path classifier is ambiguous (confidence below threshold), the semantic
+classifier uses sentence embeddings to compare the request against pre-defined anchor
+prompts for each tier.
+
+Requires: `pip install semantic-claw-router[semantic]`
+
+```yaml
+semantic_classifier:
+  enabled: true
+  model_name: "all-MiniLM-L6-v2"    # Any sentence-transformers model
+  top_k: 3                           # Average top-k anchor similarities
+  anchors:                           # Override defaults per tier
+    SIMPLE:
+      - "What is the capital of France?"
+      - "Define photosynthesis."
+      # ...
+    MEDIUM:
+      - "Write a Python function to read a CSV file."
+      # ...
+    COMPLEX:
+      - "Design a microservices architecture for e-commerce."
+      # ...
+    REASONING:
+      - "Prove by induction that sum of 1..n = n(n+1)/2."
+      # ...
+```
+
+If `sentence-transformers` is not installed, the router silently falls back to
+heuristic re-scoring. No error is raised.
+
 ## Request Deduplication
 
 ```yaml

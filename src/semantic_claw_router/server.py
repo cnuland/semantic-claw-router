@@ -166,10 +166,12 @@ class SemanticRouter:
             classification = classify_fast_path(parsed, self.config.fast_path)
 
             if classification is None:
-                # Fast-path was ambiguous — run "full" classification
-                # For POC, we use a simplified full classifier that defaults to MEDIUM
+                # Fast-path was ambiguous — run semantic or heuristic fallback
                 classification = self._full_classify(parsed)
-                source = RoutingDecisionSource.FULL_CLASSIFICATION
+                if classification.dominant_dimension == "semantic_similarity":
+                    source = RoutingDecisionSource.SEMANTIC_CLASSIFICATION
+                else:
+                    source = RoutingDecisionSource.FULL_CLASSIFICATION
             else:
                 source = RoutingDecisionSource.FAST_PATH
 
@@ -293,10 +295,18 @@ class SemanticRouter:
     def _full_classify(self, parsed: ParsedRequest) -> ClassificationResult:
         """Fallback classification when fast-path is ambiguous.
 
-        For the POC, this uses a simplified heuristic. In production,
-        this would invoke neural BERT classifiers via Candle.
+        Tries the semantic embedding classifier first (sentence-transformers).
+        If unavailable (not installed, disabled, or error), falls back to
+        heuristic re-scoring.
         """
-        # Use a simpler version of the fast-path with lower threshold
+        # Try semantic classifier
+        from .router.semantic import classify_semantic
+
+        result = classify_semantic(parsed, self.config.semantic_classifier)
+        if result is not None:
+            return result
+
+        # Fallback: heuristic re-scoring
         from .router.fastpath import DIMENSION_SCORERS
 
         scores = {}
