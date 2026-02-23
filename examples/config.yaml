@@ -1,0 +1,97 @@
+# Semantic Claw Router — Example Configuration
+# Routes between local Qwen3-Coder-Next (vLLM on OpenShift) and Google Gemini
+
+host: "0.0.0.0"
+port: 8080
+request_timeout: 120.0
+
+# ── Model Backends ───────────────────────────────────────────────────
+models:
+  - name: "qwen3-coder-next"
+    provider: "vllm"
+    endpoint: "https://qwen3-coder-next-llm-serving.instructlab-ai-7407a08c5ee477a3d3ffccce3a9f8665-0000.eu-gb.containers.appdomain.cloud"
+    context_window: 32768
+    cost_per_million_input: 0.0    # Self-hosted, no per-token cost
+    cost_per_million_output: 0.0
+    supports_tools: true
+    supports_streaming: true
+
+  - name: "gemini-2.5-flash"
+    provider: "gemini"
+    endpoint: "https://generativelanguage.googleapis.com/v1beta"
+    api_key: "***REMOVED***"
+    context_window: 1048576
+    cost_per_million_input: 0.15
+    cost_per_million_output: 0.60
+    supports_tools: true
+    supports_streaming: true
+
+# ── Tier → Model Mapping ─────────────────────────────────────────────
+# SIMPLE/MEDIUM: Use free local Qwen3 (cost optimization)
+# COMPLEX/REASONING: Use Gemini 2.5 Flash (quality optimization)
+default_tier_models:
+  SIMPLE: "qwen3-coder-next"
+  MEDIUM: "qwen3-coder-next"
+  COMPLEX: "gemini-2.5-flash"
+  REASONING: "gemini-2.5-flash"
+
+# ── Fast-Path Classifier ─────────────────────────────────────────────
+fast_path:
+  enabled: true
+  confidence_threshold: 0.7
+  weights:
+    token_count: 0.08
+    code_presence: 0.15
+    reasoning_markers: 0.18
+    technical_terms: 0.10
+    creative_markers: 0.05
+    simple_indicators: 0.02
+    multi_step_patterns: 0.12
+    question_complexity: 0.05
+    imperative_verbs: 0.03
+    constraint_indicators: 0.04
+    output_format: 0.03
+    reference_complexity: 0.02
+    negation_complexity: 0.01
+    domain_specificity: 0.02
+    agentic_task: 0.04
+  tier_boundaries:
+    simple: 0.0
+    medium: 0.3
+    complex: 0.5
+
+# ── Request Deduplication ─────────────────────────────────────────────
+dedup:
+  enabled: true
+  window_seconds: 30
+  max_entries: 10000
+
+# ── Session Pinning ───────────────────────────────────────────────────
+session:
+  enabled: true
+  ttl_seconds: 3600
+  max_sessions: 10000
+
+# ── Context Compression ──────────────────────────────────────────────
+compression:
+  enabled: true
+  threshold_bytes: 184320
+  strategies:
+    - whitespace
+    - dedup
+    - json_compact
+
+# ── Graceful Degradation ─────────────────────────────────────────────
+degradation:
+  enabled: true
+  fallback_model: "qwen3-coder-next"
+  triggers:
+    - provider_error
+    - rate_limit
+    - timeout
+
+# ── Observability ─────────────────────────────────────────────────────
+observability:
+  log_level: "INFO"
+  log_format: "text"
+  metrics_enabled: true
