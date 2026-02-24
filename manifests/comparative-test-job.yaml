@@ -1,0 +1,57 @@
+# Comparative Classifier Test — OpenShift Job
+#
+# Runs the same 23 prompts through each classifier independently:
+#   1. ClawRouter (fast-path regex, 15-dim heuristic)
+#   2. vLLM Semantic Router (sentence embeddings, all-MiniLM-L6-v2)
+#   3. Combined pipeline (fast-path → semantic fallback)
+#
+# The image at quay.io/cnuland/semantic-claw-router:latest is built
+# with INSTALL_SEMANTIC=1, so sentence-transformers is available.
+#
+# Usage:
+#   oc apply -f manifests/comparative-test-job.yaml
+#   oc logs -f job/comparative-classifier-test
+#
+# JSON output (for downstream pipelines):
+#   oc apply -f manifests/comparative-test-job.yaml
+#   oc logs job/comparative-classifier-test | python -m json.tool
+#
+# Cleanup:
+#   oc delete job comparative-classifier-test
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: comparative-classifier-test
+  namespace: aiops-harness
+  labels:
+    app: semantic-claw-router
+    component: classifier-test
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app: semantic-claw-router
+        component: classifier-test
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: test-runner
+          image: quay.io/cnuland/semantic-claw-router:latest
+          imagePullPolicy: Always
+          # Human-readable table output by default.
+          # Add "--json" for structured output (useful for CI pipelines).
+          command:
+            - python
+            - /app/examples/comparative_test.py
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "2"
+              memory: "2Gi"
+      imagePullSecrets:
+        - name: quay-viz-push
