@@ -1,0 +1,46 @@
+# Semantic Embedding Model — Proof of Effectiveness
+#
+# Proves that all-MiniLM-L6-v2 is loaded, producing real 384-dim
+# embeddings, and correctly classifying prompts the regex cannot.
+#
+# Usage:
+#   oc apply -f manifests/semantic-proof-job.yaml
+#   oc logs -f job/semantic-proof
+#
+# Cleanup:
+#   oc delete job semantic-proof
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: semantic-proof
+  namespace: aiops-harness
+  labels:
+    app: semantic-claw-router
+    component: semantic-proof
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app: semantic-claw-router
+        component: semantic-proof
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: proof-runner
+          image: quay.io/cnuland/semantic-claw-router:latest
+          imagePullPolicy: Always
+          command:
+            - python
+            - /app/examples/semantic_proof.py
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "2"
+              memory: "2Gi"
+      imagePullSecrets:
+        - name: quay-viz-push
