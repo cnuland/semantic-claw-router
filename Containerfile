@@ -17,6 +17,7 @@
 # ── Stage 1: Build ──────────────────────────────────────────────────
 FROM registry.access.redhat.com/ubi9/python-311:latest AS builder
 
+USER 0
 WORKDIR /build
 
 # Copy project files
