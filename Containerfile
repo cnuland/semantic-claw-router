@@ -15,12 +15,9 @@
 #   podman push quay.io/<org>/semantic-claw-router:latest
 
 # ── Stage 1: Build ──────────────────────────────────────────────────
-FROM python:3.11-slim AS builder
+FROM registry.access.redhat.com/ubi9/python-311:latest AS builder
 
 WORKDIR /build
-
-# Install build dependencies
-RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 
 # Copy project files
 COPY pyproject.toml README.md LICENSE ./
@@ -37,15 +34,12 @@ RUN if [ "$INSTALL_SEMANTIC" = "1" ]; then \
     fi
 
 # ── Stage 2: Runtime ───────────────────────────────────────────────
-FROM python:3.11-slim AS runtime
+FROM registry.access.redhat.com/ubi9/python-311:latest AS runtime
 
 LABEL org.opencontainers.image.title="Semantic Claw Router" \
       org.opencontainers.image.description="Intelligent LLM request router — mixture-of-models at the system level" \
       org.opencontainers.image.source="https://github.com/cnuland/semantic-claw-router" \
       org.opencontainers.image.licenses="Apache-2.0"
-
-# Non-root user
-RUN groupadd -r router && useradd -r -g router -d /app router
 
 WORKDIR /app
 
@@ -55,8 +49,8 @@ COPY --from=builder /install /usr/local
 # Copy examples (useful for reference, not required)
 COPY examples/ examples/
 
-# Switch to non-root
-USER router
+# UBI images run as non-root by default (uid 1001)
+USER 1001
 
 EXPOSE 8080
 
