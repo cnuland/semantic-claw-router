@@ -44,11 +44,15 @@ LABEL org.opencontainers.image.title="Semantic Claw Router" \
 
 WORKDIR /app
 
-# Copy installed packages from builder
-COPY --from=builder /install /usr/local
+# Copy installed packages from builder into UBI9's site-packages path
+COPY --from=builder /install/lib /opt/app-root/lib
+COPY --from=builder /install/bin /opt/app-root/bin
 
 # Copy examples (useful for reference, not required)
 COPY examples/ examples/
+
+# Ensure /opt/app-root/bin is in PATH (UBI9 default includes it)
+ENV PATH="/opt/app-root/bin:${PATH}"
 
 # UBI images run as non-root by default (uid 1001)
 USER 1001
@@ -56,7 +60,7 @@ USER 1001
 EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-  CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')" || exit 1
+  CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')" || exit 1
 
 ENTRYPOINT ["semantic-claw-router"]
 CMD ["--config", "/app/config.yaml", "--port", "8080"]
