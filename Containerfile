@@ -27,11 +27,12 @@ COPY src/ src/
 # Build arg: set to "1" to include sentence-transformers (adds ~500MB)
 ARG INSTALL_SEMANTIC=0
 
-# Install the package
+# Install the package into /opt/app-root (UBI9's default prefix)
+# so both lib/ and lib64/ end up in the right place for Python.
 RUN if [ "$INSTALL_SEMANTIC" = "1" ]; then \
-      pip install --no-cache-dir --prefix=/install ".[semantic]"; \
+      pip install --no-cache-dir --prefix=/opt/app-root ".[semantic]"; \
     else \
-      pip install --no-cache-dir --prefix=/install .; \
+      pip install --no-cache-dir --prefix=/opt/app-root .; \
     fi
 
 # ── Stage 2: Runtime ───────────────────────────────────────────────
@@ -44,9 +45,9 @@ LABEL org.opencontainers.image.title="Semantic Claw Router" \
 
 WORKDIR /app
 
-# Copy installed packages from builder into UBI9's site-packages path
-COPY --from=builder /install/lib /opt/app-root/lib
-COPY --from=builder /install/bin /opt/app-root/bin
+# Copy installed packages from builder — UBI9 Python uses /opt/app-root/
+# for both lib/ (pure Python) and lib64/ (compiled extensions like PyYAML).
+COPY --from=builder /opt/app-root /opt/app-root
 
 # Copy examples (useful for reference, not required)
 COPY examples/ examples/
