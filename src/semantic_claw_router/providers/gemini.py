@@ -56,51 +56,37 @@ def _openai_to_gemini_messages(messages: list[dict[str, Any]]) -> tuple[list[dic
             system_instruction = content
             continue
 
-        # Handle assistant messages with tool_calls
+        # Handle assistant messages with tool_calls.
+        # Convert to plain text instead of functionCall parts to avoid
+        # Gemini's thought_signature requirement on historical function calls.
+        # Gemini can still make NEW tool calls via the tools param.
         if role == "assistant" and msg.get("tool_calls"):
-            parts = []
-            # Include any text content alongside tool calls
+            text_parts = []
             if content:
-                parts.append({"text": content})
+                text_parts.append(content)
             for tc in msg["tool_calls"]:
                 func = tc.get("function", {})
-                try:
-                    args = json.loads(func.get("arguments", "{}"))
-                except (json.JSONDecodeError, TypeError):
-                    args = {}
-                parts.append({
-                    "functionCall": {
-                        "name": func.get("name", ""),
-                        "args": args,
-                    }
+                func_name = func.get("name", "unknown")
+                func_args = func.get("arguments", "{}")
+                text_parts.append(f"[Called tool: {func_name}({func_args})]")
+            if text_parts:
+                contents.append({
+                    "role": "model",
+                    "parts": [{"text": "\n".join(text_parts)}]
                 })
-            if parts:
-                contents.append({"role": "model", "parts": parts})
             continue
 
-        # Handle tool result messages
+        # Handle tool result messages — convert to plain text user message
         if role == "tool":
             tool_call_id = msg.get("tool_call_id", "")
-            tool_name = msg.get("name", "") or tool_call_id_to_name.get(tool_call_id, "")
-            if not tool_name:
-                tool_name = "unknown_function"
-                logger.warning(
-                    "Tool result missing name (tool_call_id=%s), using fallback", tool_call_id
-                )
+            tool_name = msg.get("name", "") or tool_call_id_to_name.get(tool_call_id, "tool")
             tool_content = content if isinstance(content, str) else json.dumps(content)
-            # Try to parse as JSON for structured response
-            try:
-                response_data = json.loads(tool_content)
-            except (json.JSONDecodeError, TypeError):
-                response_data = {"result": tool_content}
+            # Truncate very long tool results to avoid bloating context
+            if len(tool_content) > 4000:
+                tool_content = tool_content[:4000] + "\n... (truncated)"
             contents.append({
                 "role": "user",
-                "parts": [{
-                    "functionResponse": {
-                        "name": tool_name,
-                        "response": response_data,
-                    }
-                }]
+                "parts": [{"text": f"[Tool result from {tool_name}]: {tool_content}"}]
             })
             continue
 
@@ -249,11 +235,8 @@ class GeminiProvider(LLMProvider):
             gen_config["temperature"] = request_body["temperature"]
         if "top_p" in request_body:
             gen_config["topP"] = request_body["top_p"]
-        # Disable thinking to avoid thought_signature requirement.
-        # Thought signatures can't survive OpenAI format round-trips, so
-        # Gemini rejects follow-up requests that include tool calls without them.
-        gen_config["thinkingConfig"] = {"thinkingBudget": 0}
-        gemini_body["generationConfig"] = gen_config
+        if gen_config:
+            gemini_body["generationConfig"] = gen_config
 
         # Map tool definitions if present
         if request_body.get("tools"):
@@ -340,8 +323,8 @@ class GeminiProvider(LLMProvider):
             gen_config["temperature"] = request_body["temperature"]
         if "top_p" in request_body:
             gen_config["topP"] = request_body["top_p"]
-        gen_config["thinkingConfig"] = {"thinkingBudget": 0}
-        gemini_body["generationConfig"] = gen_config
+        if gen_config:
+            gemini_body["generationConfig"] = gen_config
 
         # Map tool definitions if present
         if request_body.get("tools"):
