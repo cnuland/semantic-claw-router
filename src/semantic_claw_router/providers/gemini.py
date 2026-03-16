@@ -249,8 +249,11 @@ class GeminiProvider(LLMProvider):
             gen_config["temperature"] = request_body["temperature"]
         if "top_p" in request_body:
             gen_config["topP"] = request_body["top_p"]
-        if gen_config:
-            gemini_body["generationConfig"] = gen_config
+        # Disable thinking to avoid thought_signature requirement.
+        # Thought signatures can't survive OpenAI format round-trips, so
+        # Gemini rejects follow-up requests that include tool calls without them.
+        gen_config["thinkingConfig"] = {"thinkingBudget": 0}
+        gemini_body["generationConfig"] = gen_config
 
         # Map tool definitions if present
         if request_body.get("tools"):
@@ -337,8 +340,8 @@ class GeminiProvider(LLMProvider):
             gen_config["temperature"] = request_body["temperature"]
         if "top_p" in request_body:
             gen_config["topP"] = request_body["top_p"]
-        if gen_config:
-            gemini_body["generationConfig"] = gen_config
+        gen_config["thinkingConfig"] = {"thinkingBudget": 0}
+        gemini_body["generationConfig"] = gen_config
 
         # Map tool definitions if present
         if request_body.get("tools"):
