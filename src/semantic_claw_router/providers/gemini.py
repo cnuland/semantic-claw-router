@@ -60,6 +60,7 @@ def _openai_to_gemini_messages(messages: list[dict[str, Any]]) -> tuple[list[dic
         # Convert to plain text instead of functionCall parts to avoid
         # Gemini's thought_signature requirement on historical function calls.
         # Gemini can still make NEW tool calls via the tools param.
+        # Use natural language so the model doesn't mimic bracket syntax.
         if role == "assistant" and msg.get("tool_calls"):
             text_parts = []
             if content:
@@ -68,7 +69,7 @@ def _openai_to_gemini_messages(messages: list[dict[str, Any]]) -> tuple[list[dic
                 func = tc.get("function", {})
                 func_name = func.get("name", "unknown")
                 func_args = func.get("arguments", "{}")
-                text_parts.append(f"[Called tool: {func_name}({func_args})]")
+                text_parts.append(f"I used the {func_name} tool with: {func_args}")
             if text_parts:
                 contents.append({
                     "role": "model",
@@ -86,7 +87,7 @@ def _openai_to_gemini_messages(messages: list[dict[str, Any]]) -> tuple[list[dic
                 tool_content = tool_content[:4000] + "\n... (truncated)"
             contents.append({
                 "role": "user",
-                "parts": [{"text": f"[Tool result from {tool_name}]: {tool_content}"}]
+                "parts": [{"text": f"Result from {tool_name}: {tool_content}"}]
             })
             continue
 
