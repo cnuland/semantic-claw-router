@@ -112,7 +112,18 @@ def _openai_to_gemini_messages(messages: list[dict[str, Any]]) -> tuple[list[dic
 
     for msg in messages:
         role = msg.get("role", "user")
-        content = msg.get("content", "")
+        raw_content = msg.get("content", "")
+
+        # Normalize content: OpenAI format allows both string and list of parts
+        if isinstance(raw_content, list):
+            content = " ".join(
+                p.get("text", "") for p in raw_content
+                if isinstance(p, dict) and p.get("type") == "text"
+            )
+        elif isinstance(raw_content, str):
+            content = raw_content
+        else:
+            content = str(raw_content) if raw_content else ""
 
         if role == "system":
             system_instruction = content
