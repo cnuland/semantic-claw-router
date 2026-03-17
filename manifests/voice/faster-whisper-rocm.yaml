@@ -1,0 +1,96 @@
+---
+# GPU-accelerated Faster Whisper with Wyoming protocol for Home Assistant
+# Uses ROCm on AMD Radeon 8060S (Strix Halo, gfx1151)
+# Replaces CPU-only wyoming-whisper with ~10-20x faster GPU inference
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: faster-whisper-rocm
+  namespace: voice
+  labels:
+    app.kubernetes.io/name: faster-whisper-rocm
+    app.kubernetes.io/part-of: voice-assistant
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: faster-whisper-rocm
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: faster-whisper-rocm
+        app.kubernetes.io/part-of: voice-assistant
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: worker-01.ironman.cjlabs.dev
+      containers:
+        - name: whisper
+          image: pigeekcom/wyoming-faster-whisper-rocm:rocm7.0-strix
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: WYOMING_MODEL
+              value: "large-v3"
+            - name: WYOMING_LANGUAGE
+              value: "en"
+            - name: WYOMING_COMPUTE_TYPE
+              value: "int8"
+            - name: WYOMING_BEAM_SIZE
+              value: "1"
+            - name: HSA_OVERRIDE_GFX_VERSION
+              value: "11.0.0"
+            - name: ROCM_PATH
+              value: /opt/rocm
+            - name: HOME
+              value: /tmp
+          ports:
+            - name: tcp
+              containerPort: 10300
+              protocol: TCP
+          resources:
+            requests:
+              amd.com/gpu: "1"
+              memory: 8Gi
+            limits:
+              amd.com/gpu: "1"
+              memory: 16Gi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          livenessProbe:
+            tcpSocket:
+              port: 10300
+            initialDelaySeconds: 300
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 5
+          readinessProbe:
+            tcpSocket:
+              port: 10300
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: whisper-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: faster-whisper-rocm
+  namespace: voice
+  labels:
+    app.kubernetes.io/name: faster-whisper-rocm
+    app.kubernetes.io/part-of: voice-assistant
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: faster-whisper-rocm
+  ports:
+    - name: tcp
+      port: 10300
+      targetPort: 10300
+      protocol: TCP

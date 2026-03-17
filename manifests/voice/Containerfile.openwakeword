@@ -1,0 +1,2 @@
+FROM rhasspy/wyoming-openwakeword:latest
+COPY hey_shadowbot.onnx hey_shadowbot.onnx.data /custom/

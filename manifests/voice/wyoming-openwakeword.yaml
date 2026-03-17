@@ -1,0 +1,98 @@
+---
+# Wyoming openWakeWord service with custom "hey shadowbot" wake word
+# Serves wake word detection over Wyoming protocol for Home Assistant
+#
+# After deploying, copy the model files into the PVC:
+#   oc cp models/hey_shadowbot/hey_shadowbot.onnx voice/<pod>:/custom/hey_shadowbot.onnx
+#   oc cp models/hey_shadowbot/hey_shadowbot.onnx.data voice/<pod>:/custom/hey_shadowbot.onnx.data
+#   oc rollout restart deployment/wyoming-openwakeword -n voice
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: openwakeword-custom-models
+  namespace: voice
+  labels:
+    app.kubernetes.io/name: wyoming-openwakeword
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: nfs-storage
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wyoming-openwakeword
+  namespace: voice
+  labels:
+    app.kubernetes.io/name: wyoming-openwakeword
+    app.kubernetes.io/part-of: voice-assistant
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: wyoming-openwakeword
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: wyoming-openwakeword
+        app.kubernetes.io/part-of: voice-assistant
+    spec:
+      containers:
+        - name: openwakeword
+          image: rhasspy/wyoming-openwakeword:latest
+          args:
+            - --uri
+            - tcp://0.0.0.0:10400
+            - --custom-model-dir
+            - /custom
+            - --preload-model
+            - hey_shadowbot
+          ports:
+            - name: tcp
+              containerPort: 10400
+              protocol: TCP
+          resources:
+            requests:
+              cpu: 500m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          volumeMounts:
+            - name: custom-models
+              mountPath: /custom
+          livenessProbe:
+            tcpSocket:
+              port: 10400
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          readinessProbe:
+            tcpSocket:
+              port: 10400
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      volumes:
+        - name: custom-models
+          persistentVolumeClaim:
+            claimName: openwakeword-custom-models
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: wyoming-openwakeword
+  namespace: voice
+  labels:
+    app.kubernetes.io/name: wyoming-openwakeword
+    app.kubernetes.io/part-of: voice-assistant
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: wyoming-openwakeword
+  ports:
+    - name: tcp
+      port: 10400
+      targetPort: 10400
+      protocol: TCP

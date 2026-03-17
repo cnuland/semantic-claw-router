@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: semantic-claw-router
+  namespace: gpt-oss
+  labels:
+    app: semantic-claw-router
+spec:
+  selector:
+    app: semantic-claw-router
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+  type: ClusterIP

@@ -1,0 +1,24 @@
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: semantic-claw-router
+  namespace: gpt-oss
+  labels:
+    app: semantic-claw-router
+spec:
+  output:
+    pushSecret:
+      name: quay-push
+    to:
+      kind: DockerImage
+      name: quay.io/cnuland/vllm-semantic-claw-router:latest
+  source:
+    type: Binary
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Containerfile
+      buildArgs:
+        - name: INSTALL_SEMANTIC
+          value: "1"
+  triggers: []

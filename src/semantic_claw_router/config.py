@@ -138,6 +138,41 @@ class DegradationConfig:
 
 
 @dataclass
+class ReasoningConfig:
+    """Configuration for first-class reasoning mode (Athena v0.2).
+
+    When enabled, the router toggles reasoning parameters on supported
+    models based on the classified complexity tier.
+    """
+
+    enabled: bool = True
+    tiers: list[str] = field(default_factory=lambda: ["COMPLEX", "REASONING"])
+    temperature_reasoning: float = 0.7
+    temperature_simple: float = 0.0
+
+
+@dataclass
+class SafetyConfig:
+    """Configuration for safety signal detection (Athena v0.2).
+
+    Basic jailbreak keyword detection as a pre-routing guard.
+    """
+
+    enabled: bool = False
+    block_action: str = "reject"  # "reject" or "flag"
+    jailbreak_keywords: list[str] = field(default_factory=lambda: [
+        "ignore previous instructions",
+        "ignore all instructions",
+        "disregard your instructions",
+        "pretend you are",
+        "act as if you have no",
+        "jailbreak",
+        "DAN mode",
+        "developer mode enabled",
+    ])
+
+
+@dataclass
 class ObservabilityConfig:
     """Configuration for observability."""
 
@@ -175,6 +210,8 @@ class RouterConfig:
     session: SessionConfig = field(default_factory=SessionConfig)
     compression: CompressionConfig = field(default_factory=CompressionConfig)
     degradation: DegradationConfig = field(default_factory=DegradationConfig)
+    reasoning: ReasoningConfig = field(default_factory=ReasoningConfig)
+    safety: SafetyConfig = field(default_factory=SafetyConfig)
     observability: ObservabilityConfig = field(default_factory=ObservabilityConfig)
     default_tier_models: dict[str, str] = field(default_factory=dict)
     request_timeout: float = 120.0
@@ -210,6 +247,8 @@ class RouterConfig:
                 cost_per_million_output=m.get("cost_per_million_output", 0.0),
                 supports_tools=m.get("supports_tools", True),
                 supports_streaming=m.get("supports_streaming", True),
+                supports_reasoning=m.get("supports_reasoning", False),
+                reasoning_effort=m.get("reasoning_effort", "medium"),
             ))
 
         fp = data.get("fast_path", {})
@@ -257,6 +296,30 @@ class RouterConfig:
         if deg:
             config.degradation.enabled = deg.get("enabled", True)
             config.degradation.fallback_model = deg.get("fallback_model", "")
+
+        reas = data.get("reasoning", {})
+        if reas:
+            config.reasoning.enabled = reas.get("enabled", True)
+            config.reasoning.tiers = reas.get("tiers", ["COMPLEX", "REASONING"])
+            config.reasoning.temperature_reasoning = reas.get(
+                "temperature_reasoning", 0.7
+            )
+            config.reasoning.temperature_simple = reas.get(
+                "temperature_simple", 0.0
+            )
+
+        safety = data.get("safety", {})
+        if safety:
+            config.safety.enabled = safety.get("enabled", False)
+            config.safety.block_action = safety.get("block_action", "reject")
+            if "jailbreak_keywords" in safety:
+                config.safety.jailbreak_keywords = safety["jailbreak_keywords"]
+
+        obs = data.get("observability", {})
+        if obs:
+            config.observability.log_level = obs.get("log_level", "INFO")
+            config.observability.log_format = obs.get("log_format", "json")
+            config.observability.metrics_enabled = obs.get("metrics_enabled", True)
 
         config.default_tier_models = data.get("default_tier_models", {})
 

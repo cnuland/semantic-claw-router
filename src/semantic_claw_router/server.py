@@ -268,15 +268,6 @@ class SemanticRouter:
         if target_model.provider == "ollama" and "qwen" in target_model.name.lower():
             body = dict(body)
             body["think"] = use_reasoning
-            if not use_reasoning:
-                messages = list(body.get("messages", []))
-                has_system = any(m.get("role") == "system" for m in messages)
-                if not has_system:
-                    messages.insert(0, {
-                        "role": "system",
-                        "content": "Be direct and concise. Answer immediately without showing your reasoning process.",
-                    })
-                body["messages"] = messages
 
         # ── Stage 7: Route to provider ──
         provider = self._get_provider(target_model)
@@ -558,15 +549,6 @@ class SemanticRouter:
         if target_model.provider == "ollama" and "qwen" in target_model.name.lower():
             body = dict(body)
             body["think"] = use_reasoning
-            if not use_reasoning:
-                messages = list(body.get("messages", []))
-                has_system = any(m.get("role") == "system" for m in messages)
-                if not has_system:
-                    messages.insert(0, {
-                        "role": "system",
-                        "content": "Be direct and concise. Answer immediately without showing your reasoning process.",
-                    })
-                body["messages"] = messages
 
         # Build metadata headers
         latency = (time.monotonic() - start) * 1000

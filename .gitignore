@@ -33,3 +33,4 @@ Thumbs.db
 .env
 .env.local
 *.secret
+config.local.yaml

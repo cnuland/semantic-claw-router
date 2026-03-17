@@ -59,6 +59,13 @@ class DecisionEngine:
         # Estimate cost
         estimated_cost = self._estimate_cost(target, classification)
 
+        # First-class reasoning mode (Athena v0.2)
+        use_reasoning = (
+            self.config.reasoning.enabled
+            and classification.tier.value in self.config.reasoning.tiers
+            and target.supports_reasoning
+        )
+
         return RoutingDecision(
             target_model=target,
             tier=classification.tier,
@@ -67,6 +74,7 @@ class DecisionEngine:
             classification=classification,
             session_id=session_id,
             estimated_cost=estimated_cost,
+            use_reasoning=use_reasoning,
         )
 
     def decide_degraded(self, original_tier: ComplexityTier) -> RoutingDecision | None:

@@ -61,8 +61,10 @@ _CREATIVE_KEYWORDS = re.compile(
 )
 
 _SIMPLE_KEYWORDS = re.compile(
-    r"\b(what is|define|translate|hello|hi there|"
+    r"\b(what is|define|translate|hello|hi there|hey|"
     r"who is|when was|where is|how many|"
+    r"how are you|how's it going|good morning|good evening|"
+    r"what's up|sup|thanks|thank you|goodbye|bye|"
     r"list of|name the|tell me about|"
     r"convert|calculate|sum of|"
     r"yes or no|true or false)\b",
@@ -323,6 +325,21 @@ def classify_fast_path(
     """
     if not config.enabled:
         return None
+
+    # Ultra-short user messages (< 15 tokens) are always SIMPLE unless they
+    # contain code or reasoning keywords — no need for semantic fallback.
+    # Use user_messages_text length, not estimated_tokens which includes system prompts.
+    user_text = request.user_messages_text
+    user_tokens = len(user_text) // 4 if user_text else 0
+    if user_tokens < 15:
+        if not _CODE_KEYWORDS.search(user_text) and not _REASONING_KEYWORDS.search(user_text):
+            return ClassificationResult(
+                tier=ComplexityTier.SIMPLE,
+                confidence=0.95,
+                scores={"token_count": -0.8},
+                is_agentic=False,
+                dominant_dimension="short_message",
+            )
 
     # Score all dimensions
     scores: dict[str, float] = {}

@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: semantic-claw-router
+  namespace: gpt-oss
+  labels:
+    app: semantic-claw-router
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: semantic-claw-router
+  template:
+    metadata:
+      labels:
+        app: semantic-claw-router
+    spec:
+      containers:
+        - name: router
+          image: quay.io/cnuland/vllm-semantic-claw-router:latest
+          imagePullPolicy: Always
+          args: ["--config", "/config/config.yaml", "--port", "8080"]
+          env:
+            - name: GEMINI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: semantic-claw-router-keys
+                  key: GEMINI_API_KEY
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 2Gi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+      imagePullSecrets:
+        - name: quay-pull
+      volumes:
+        - name: config
+          configMap:
+            name: semantic-claw-router-config

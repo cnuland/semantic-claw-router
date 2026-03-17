@@ -1,0 +1,17 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: semantic-claw-router
+  namespace: gpt-oss
+  labels:
+    app: semantic-claw-router
+  annotations:
+    haproxy.router.openshift.io/timeout: 300s
+spec:
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+  to:
+    kind: Service
+    name: semantic-claw-router

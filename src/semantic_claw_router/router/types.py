@@ -106,6 +106,8 @@ class ModelBackend:
     cost_per_million_output: float = 0.0
     supports_tools: bool = True
     supports_streaming: bool = True
+    supports_reasoning: bool = False
+    reasoning_effort: str = "medium"  # low, medium, high
 
 
 @dataclass
@@ -119,6 +121,7 @@ class RoutingDecision:
     classification: ClassificationResult | None = None
     session_id: str | None = None
     estimated_cost: float = 0.0
+    use_reasoning: bool = False
     timestamp: float = field(default_factory=time.time)
     metadata: dict[str, Any] = field(default_factory=dict)
 

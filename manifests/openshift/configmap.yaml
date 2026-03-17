@@ -1,0 +1,126 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: semantic-claw-router-config
+  namespace: gpt-oss
+  labels:
+    app: semantic-claw-router
+data:
+  config.yaml: |
+    # Semantic Claw Router v0.2 (Athena) — OpenShift Homelab Configuration
+    # Routes between local Ollama Qwen3-30B (free) and Google Gemini (cloud)
+
+    host: "0.0.0.0"
+    port: 8080
+    request_timeout: 300.0
+
+    # ── Model Backends ───────────────────────────────────────────────────
+    models:
+      # Local model: free, self-hosted Ollama on Vulkan
+      - name: "qwen3:30b-a3b"
+        provider: "ollama"
+        endpoint: "http://ollama-qwen3-30b.gpt-oss.svc:11434"
+        context_window: 65536
+        cost_per_million_input: 0.0
+        cost_per_million_output: 0.0
+        supports_tools: false
+        supports_streaming: true
+        supports_reasoning: true
+        reasoning_effort: "medium"
+
+      # Cloud model: Google Gemini 3.1 Pro (paid, high quality)
+      - name: "gemini-3.1-pro-preview"
+        provider: "gemini"
+        endpoint: "https://generativelanguage.googleapis.com/v1beta"
+        api_key: "${GEMINI_API_KEY}"
+        context_window: 2097152
+        cost_per_million_input: 1.25
+        cost_per_million_output: 10.00
+        supports_tools: true
+        supports_streaming: true
+        supports_reasoning: true
+        reasoning_effort: "high"
+
+    # ── Tier → Model Mapping ─────────────────────────────────────────────
+    # SIMPLE/MEDIUM: Use free local Qwen3 (cost optimization)
+    # COMPLEX/REASONING: Use Gemini 2.5 Pro (quality optimization)
+    default_tier_models:
+      SIMPLE: "qwen3:30b-a3b"
+      MEDIUM: "qwen3:30b-a3b"
+      COMPLEX: "gemini-3.1-pro-preview"
+      REASONING: "gemini-3.1-pro-preview"
+
+    # ── Fast-Path Classifier ─────────────────────────────────────────────
+    fast_path:
+      enabled: true
+      confidence_threshold: 0.7
+      weights:
+        token_count: 0.08
+        code_presence: 0.15
+        reasoning_markers: 0.18
+        technical_terms: 0.10
+        creative_markers: 0.05
+        simple_indicators: 0.08
+        multi_step_patterns: 0.12
+        question_complexity: 0.05
+        imperative_verbs: 0.03
+        constraint_indicators: 0.04
+        output_format: 0.03
+        reference_complexity: 0.02
+        negation_complexity: 0.01
+        domain_specificity: 0.02
+        agentic_task: 0.04
+
+    # ── Semantic Classifier ──────────────────────────────────────────────
+    semantic_classifier:
+      enabled: true
+      model_name: "all-MiniLM-L6-v2"
+      top_k: 3
+
+    # ── First-Class Reasoning Mode (Athena v0.2) ─────────────────────────
+    reasoning:
+      enabled: true
+      tiers: ["COMPLEX", "REASONING"]
+      temperature_reasoning: 0.7
+      temperature_simple: 0.0
+
+    # ── Safety Signals (Athena v0.2) ─────────────────────────────────────
+    safety:
+      enabled: true
+      block_action: "reject"
+
+    # ── Request Deduplication ─────────────────────────────────────────────
+    dedup:
+      enabled: true
+      window_seconds: 30
+      max_entries: 10000
+
+    # ── Session Pinning ───────────────────────────────────────────────────
+    session:
+      enabled: true
+      ttl_seconds: 3600
+      max_sessions: 10000
+
+    # ── Context Compression ──────────────────────────────────────────────
+    compression:
+      enabled: true
+      threshold_bytes: 184320
+      strategies:
+        - whitespace
+        - dedup
+        - json_compact
+
+    # ── Graceful Degradation ─────────────────────────────────────────────
+    degradation:
+      enabled: true
+      fallback_model: "qwen3:30b-a3b"
+      triggers:
+        - provider_error
+        - rate_limit
+        - timeout
+
+    # ── Observability ─────────────────────────────────────────────────────
+    observability:
+      log_level: "INFO"
+      log_format: "json"
+      metrics_enabled: true

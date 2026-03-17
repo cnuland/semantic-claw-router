@@ -76,6 +76,38 @@ When implementing features inspired by ClawRouter, include this header comment:
 # Re-implemented in Python for the Semantic Claw Router pipeline.
 ```
 
+## Local Development (test before deploying to OpenShift)
+
+Always test router changes locally before pushing to the OpenShift BuildConfig. The cluster build/deploy cycle takes ~20 minutes.
+
+```bash
+# 1. Source API keys
+export $(cat .env | xargs)
+
+# 2. Port-forward the cluster Ollama so the local model backend works
+oc port-forward svc/ollama-qwen3-30b 11434:11434 -n gpt-oss &
+
+# 3. Run the router locally
+python -m semantic_claw_router -c config.local.yaml
+
+# 4. Run the test harness (validates streaming, tool calls, routing)
+python scripts/test_local.py
+
+# 5. Test individual scenarios
+python scripts/test_local.py --test simple    # Should route to local Qwen3
+python scripts/test_local.py --test complex   # Should route to Gemini
+python scripts/test_local.py --test tools     # Tool call history (Gemini regression test)
+python scripts/test_local.py --test no-name   # Tool result without name field
+
+# 6. When satisfied, deploy to OpenShift
+oc start-build semantic-claw-router --from-dir=. -n gpt-oss --follow
+```
+
+Key files for local dev:
+- `.env` — API keys (gitignored)
+- `config.local.yaml` — local config pointing to localhost:11434 (gitignored)
+- `scripts/test_local.py` — test harness mimicking OpenClaw's request patterns
+
 ## Testing
 
 ```bash

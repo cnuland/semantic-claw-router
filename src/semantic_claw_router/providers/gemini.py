@@ -3,10 +3,20 @@
 Translates OpenAI-format chat completion requests to the Gemini API format
 and translates responses back. Enables seamless routing between vLLM and
 Gemini without client changes.
+
+Key design: Gemini 3.1 Pro Preview requires thinking mode, and thinking mode
+requires thought_signatures on historical functionCall parts. These signatures
+can't survive the OpenAI format natively (no field for them). We solve this by
+smuggling the thoughtSignature and Gemini function-call ID inside the OpenAI
+tool_call_id field using a structured prefix:
+    "gsig:<gemini_fc_id>:<base64_thought_signature>"
+On the return trip, we extract these and reconstruct native Gemini function
+calling format, giving the model clean tool history it can continue from.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import time
@@ -22,13 +32,64 @@ logger = logging.getLogger(__name__)
 # Gemini API base URL
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta"
 
+# Prefix used to identify tool_call_ids that carry Gemini metadata
+# Version 1 format: gsig1:<fc_id>:<crc4>:<thought_signature>
+_GSIG_PREFIX = "gsig1:"
+
+
+def _crc8(data: str) -> str:
+    """Compute a short checksum for corruption detection."""
+    return hashlib.md5(data.encode()).hexdigest()[:4]
+
+
+def _pack_tool_call_id(gemini_fc_id: str, thought_signature: str) -> str:
+    """Pack Gemini function call ID and thought signature into an OpenAI tool_call_id.
+
+    Format: "gsig1:<gemini_fc_id>:<crc>:<thought_signature>"
+    - gsig1 = version 1 prefix (allows future format changes)
+    - crc = 4-char MD5 prefix for corruption detection
+    - thought_signature = raw value from Gemini (already base64)
+    """
+    crc = _crc8(thought_signature) if thought_signature else "0000"
+    return f"{_GSIG_PREFIX}{gemini_fc_id}:{crc}:{thought_signature}"
+
+
+def _unpack_tool_call_id(tool_call_id: str) -> tuple[str | None, str | None]:
+    """Extract Gemini function call ID and thought signature from a packed tool_call_id.
+
+    Returns (gemini_fc_id, thought_signature) or (None, None) if not a packed ID
+    or if the checksum doesn't match (corruption detected).
+    """
+    if not tool_call_id.startswith(_GSIG_PREFIX):
+        return None, None
+    remainder = tool_call_id[len(_GSIG_PREFIX):]
+    # Format: <fc_id>:<crc>:<signature>
+    parts = remainder.split(":", 2)
+    if len(parts) < 3:
+        logger.warning("Malformed packed tool_call_id: missing parts")
+        return None, None
+    gemini_fc_id, crc, thought_sig = parts
+
+    # Verify checksum
+    if thought_sig:
+        expected_crc = _crc8(thought_sig)
+        if crc != expected_crc:
+            logger.error(
+                "Thought signature corruption detected for fc_id=%s: "
+                "expected crc %s, got %s. Falling back to text mode.",
+                gemini_fc_id, expected_crc, crc,
+            )
+            return None, None
+
+    return gemini_fc_id, thought_sig
+
 
 def _openai_to_gemini_messages(messages: list[dict[str, Any]]) -> tuple[list[dict], str | None]:
     """Convert OpenAI message format to Gemini format.
 
-    Handles tool-calling messages:
-    - assistant messages with tool_calls → model role with functionCall parts
-    - tool messages (results) → user role with functionResponse parts
+    Uses native Gemini functionCall/functionResponse parts when thought
+    signatures are available (packed in tool_call_id). Falls back to text
+    flattening for tool calls without signatures (e.g., from non-Gemini models).
 
     Returns:
         (gemini_contents, system_instruction)
@@ -36,62 +97,128 @@ def _openai_to_gemini_messages(messages: list[dict[str, Any]]) -> tuple[list[dic
     system_instruction = None
     contents = []
 
-    # Build a lookup from tool_call_id → function name so we can resolve
-    # tool result names even when the "name" field is missing.
+    # Build lookups from tool_call_id → function name and tool_call_id → full info
     tool_call_id_to_name: dict[str, str] = {}
+    tool_call_id_to_info: dict[str, dict] = {}
     for msg in messages:
         if msg.get("role") == "assistant" and msg.get("tool_calls"):
             for tc in msg["tool_calls"]:
                 tc_id = tc.get("id", "")
-                func_name = tc.get("function", {}).get("name", "")
-                if tc_id and func_name:
+                func = tc.get("function", {})
+                func_name = func.get("name", "")
+                if tc_id:
                     tool_call_id_to_name[tc_id] = func_name
+                    tool_call_id_to_info[tc_id] = tc
 
     for msg in messages:
         role = msg.get("role", "user")
         content = msg.get("content", "")
 
         if role == "system":
-            # Gemini uses systemInstruction, not a system message
             system_instruction = content
             continue
 
-        # Handle assistant messages with tool_calls.
-        # Convert to plain text instead of functionCall parts to avoid
-        # Gemini's thought_signature requirement on historical function calls.
-        # Gemini can still make NEW tool calls via the tools param.
-        # Use natural language so the model doesn't mimic bracket syntax.
+        # Handle assistant messages with tool_calls
         if role == "assistant" and msg.get("tool_calls"):
-            text_parts = []
-            if content:
-                text_parts.append(content)
-            for tc in msg["tool_calls"]:
-                func = tc.get("function", {})
-                func_name = func.get("name", "unknown")
-                func_args = func.get("arguments", "{}")
-                text_parts.append(f"I used the {func_name} tool with: {func_args}")
-            if text_parts:
+            parts = []
+
+            # Add any text content as a text part
+            if content and content.strip():
+                parts.append({"text": content})
+
+            # Check if ANY tool call in this turn has a packed Gemini signature.
+            # If so, use native functionCall format for ALL calls in this turn.
+            # For parallel calls, only the first functionCall gets the
+            # thoughtSignature — subsequent ones in the same turn have empty sigs.
+            any_has_sig = any(
+                _unpack_tool_call_id(tc.get("id", ""))[0] is not None
+                for tc in msg["tool_calls"]
+            )
+
+            if any_has_sig:
+                for tc in msg["tool_calls"]:
+                    tc_id = tc.get("id", "")
+                    func = tc.get("function", {})
+                    func_name = func.get("name", "")
+                    args_str = func.get("arguments", "{}")
+
+                    try:
+                        args = json.loads(args_str) if isinstance(args_str, str) else args_str
+                    except (json.JSONDecodeError, TypeError):
+                        args = {}
+
+                    gemini_fc_id, thought_sig = _unpack_tool_call_id(tc_id)
+                    part: dict[str, Any] = {
+                        "functionCall": {
+                            "name": func_name,
+                            "args": args,
+                            "id": gemini_fc_id or tc_id,
+                        },
+                    }
+                    # Only add thoughtSignature if present (first call in parallel)
+                    if thought_sig:
+                        part["thoughtSignature"] = thought_sig
+                    parts.append(part)
+
+                contents.append({"role": "model", "parts": parts})
+            else:
+                # Fallback: generate text summary (for non-Gemini tool calls)
+                summary = content if (content and content.strip()) else _summarize_tool_calls(msg["tool_calls"])
                 contents.append({
                     "role": "model",
-                    "parts": [{"text": "\n".join(text_parts)}]
+                    "parts": [{"text": summary}]
                 })
             continue
 
-        # Handle tool result messages — convert to plain text user message
+        # Handle tool result messages
         if role == "tool":
             tool_call_id = msg.get("tool_call_id", "")
             tool_name = msg.get("name", "") or tool_call_id_to_name.get(tool_call_id, "tool")
             tool_content = content if isinstance(content, str) else json.dumps(content)
-            # Truncate very long tool results to avoid bloating context
+
+            # Truncate very long tool results
             if len(tool_content) > 4000:
                 tool_content = tool_content[:4000] + "\n... (truncated)"
-            contents.append({
-                "role": "user",
-                "parts": [{"text": f"Result from {tool_name}: {tool_content}"}]
-            })
+
+            # Check if the corresponding tool call had a thought signature
+            gemini_fc_id, thought_sig = _unpack_tool_call_id(tool_call_id)
+            if gemini_fc_id:
+                # Native Gemini functionResponse format
+                try:
+                    response_data = json.loads(tool_content)
+                except (json.JSONDecodeError, TypeError):
+                    response_data = {"result": tool_content}
+
+                func_response_part = {
+                    "functionResponse": {
+                        "name": tool_name,
+                        "id": gemini_fc_id,
+                        "response": response_data,
+                    }
+                }
+
+                # Merge into previous user turn if it also has functionResponse parts
+                if (contents and contents[-1]["role"] == "user"
+                        and any("functionResponse" in p for p in contents[-1]["parts"])):
+                    contents[-1]["parts"].append(func_response_part)
+                else:
+                    contents.append({
+                        "role": "user",
+                        "parts": [func_response_part]
+                    })
+            else:
+                # Fallback: plain text (for non-Gemini tool results)
+                tool_text = f"[{tool_name} result]: {tool_content}"
+                if contents and contents[-1]["role"] == "user":
+                    contents[-1]["parts"].append({"text": tool_text})
+                else:
+                    contents.append({
+                        "role": "user",
+                        "parts": [{"text": tool_text}]
+                    })
             continue
 
-        # Map OpenAI roles to Gemini roles
+        # Regular user/assistant messages
         gemini_role = "user" if role == "user" else "model"
 
         parts = []
@@ -103,15 +230,61 @@ def _openai_to_gemini_messages(messages: list[dict[str, Any]]) -> tuple[list[dic
                     parts.append({"text": part["text"]})
 
         if parts:
-            contents.append({"role": gemini_role, "parts": parts})
+            if contents and contents[-1]["role"] == gemini_role:
+                contents[-1]["parts"].extend(parts)
+            else:
+                contents.append({"role": gemini_role, "parts": parts})
 
     return contents, system_instruction
+
+
+def _summarize_tool_calls(tool_calls: list[dict[str, Any]]) -> str:
+    """Generate a brief text summary for tool calls without thought signatures.
+
+    Used as fallback when native Gemini format isn't available.
+    """
+    parts = []
+    for tc in tool_calls:
+        func = tc.get("function", {})
+        name = func.get("name", "action")
+        args_str = func.get("arguments", "{}")
+        try:
+            args = json.loads(args_str) if isinstance(args_str, str) else args_str
+        except (json.JSONDecodeError, TypeError):
+            args = {}
+
+        if name in ("read", "Read"):
+            path = args.get("path", args.get("file_path", "file"))
+            parts.append(f"I read {path}")
+        elif name in ("write", "Write"):
+            path = args.get("path", args.get("file_path", "file"))
+            parts.append(f"I wrote to {path}")
+        elif name in ("edit", "Edit"):
+            path = args.get("path", args.get("file_path", "file"))
+            parts.append(f"I edited {path}")
+        elif name in ("exec", "Bash"):
+            cmd = args.get("command", "a command")
+            if len(cmd) > 60:
+                cmd = cmd[:57] + "..."
+            parts.append(f"I ran: {cmd}")
+        elif name == "message":
+            parts.append("I sent a message")
+        else:
+            first_val = next(iter(args.values()), "") if args else ""
+            if isinstance(first_val, str) and len(first_val) > 40:
+                first_val = first_val[:37] + "..."
+            parts.append(f"I called {name}({first_val})" if first_val else f"I called {name}")
+
+    return "; ".join(parts) if parts else "I took an action"
 
 
 def _gemini_to_openai_response(
     gemini_resp: dict[str, Any], model_name: str
 ) -> dict[str, Any]:
-    """Convert Gemini response format to OpenAI chat completion format."""
+    """Convert Gemini response format to OpenAI chat completion format.
+
+    Packs thoughtSignature into tool_call_id for round-trip preservation.
+    """
     candidates = gemini_resp.get("candidates", [])
     choices = []
 
@@ -142,12 +315,23 @@ def _gemini_to_openai_response(
         }
 
         # Translate Gemini functionCall parts to OpenAI tool_calls
-        func_calls = [p["functionCall"] for p in parts if "functionCall" in p]
-        if func_calls:
+        # Pack thoughtSignature into the tool_call_id for round-trip preservation
+        func_call_parts = [p for p in parts if "functionCall" in p]
+        if func_call_parts:
             tool_calls = []
-            for j, fc in enumerate(func_calls):
+            for j, part in enumerate(func_call_parts):
+                fc = part["functionCall"]
+                thought_sig = part.get("thoughtSignature", "")
+                gemini_fc_id = fc.get("id", f"fc_{int(time.time())}_{j}")
+
+                # Pack the signature into the tool_call_id
+                if thought_sig:
+                    packed_id = _pack_tool_call_id(gemini_fc_id, thought_sig)
+                else:
+                    packed_id = f"call_gemini_{int(time.time())}_{j}"
+
                 tool_calls.append({
-                    "id": f"call_gemini_{int(time.time())}_{j}",
+                    "id": packed_id,
                     "type": "function",
                     "function": {
                         "name": fc.get("name", ""),
@@ -155,6 +339,8 @@ def _gemini_to_openai_response(
                     },
                 })
             message["tool_calls"] = tool_calls
+            # Per OpenAI convention, content is null when making tool calls.
+            message["content"] = None
 
         choices.append({
             "index": i,
@@ -382,14 +568,12 @@ class GeminiProvider(LLMProvider):
                             ]
                             text = "".join(text_parts)
 
-                            # Extract function calls
-                            func_calls = [
-                                p["functionCall"]
-                                for p in parts
-                                if "functionCall" in p
+                            # Extract function calls with thought signatures
+                            func_call_parts = [
+                                p for p in parts if "functionCall" in p
                             ]
 
-                            if not text and not func_calls:
+                            if not text and not func_call_parts:
                                 # Check for finishReason even without content
                                 gemini_finish = candidate.get("finishReason")
                                 if gemini_finish and gemini_finish not in ("FINISH_REASON_UNSPECIFIED",):
@@ -415,13 +599,24 @@ class GeminiProvider(LLMProvider):
                                 logger.info("Gemini stream: text chunk len=%d", len(text))
 
                             # Translate Gemini functionCall to OpenAI tool_calls
-                            if func_calls:
-                                logger.info("Gemini stream: tool_call %s", [fc.get("name") for fc in func_calls])
+                            # Pack thoughtSignature into tool_call_id
+                            if func_call_parts:
+                                logger.info("Gemini stream: tool_call %s",
+                                           [p["functionCall"].get("name") for p in func_call_parts])
                                 tool_calls = []
-                                for i, fc in enumerate(func_calls):
+                                for idx, part in enumerate(func_call_parts):
+                                    fc = part["functionCall"]
+                                    thought_sig = part.get("thoughtSignature", "")
+                                    gemini_fc_id = fc.get("id", f"fc_{chunk_id}_{idx}")
+
+                                    if thought_sig:
+                                        packed_id = _pack_tool_call_id(gemini_fc_id, thought_sig)
+                                    else:
+                                        packed_id = f"call_{chunk_id}_{idx}"
+
                                     tool_calls.append({
-                                        "index": i,
-                                        "id": f"call_{chunk_id}_{i}",
+                                        "index": idx,
+                                        "id": packed_id,
                                         "type": "function",
                                         "function": {
                                             "name": fc.get("name", ""),
@@ -429,6 +624,8 @@ class GeminiProvider(LLMProvider):
                                         },
                                     })
                                 delta["tool_calls"] = tool_calls
+                                # Suppress text when making tool calls
+                                delta.pop("content", None)
 
                             finish_reason = None
                             gemini_finish = candidate.get("finishReason")

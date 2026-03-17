@@ -11,8 +11,8 @@
 #     semantic-claw-router --config /app/config.yaml
 #
 # Push to quay.io:
-#   podman tag semantic-claw-router quay.io/<org>/semantic-claw-router:latest
-#   podman push quay.io/<org>/semantic-claw-router:latest
+#   podman tag semantic-claw-router quay.io/cnuland/vllm-semantic-claw-router:latest
+#   podman push quay.io/cnuland/vllm-semantic-claw-router:latest
 
 # ── Stage 1: Build ──────────────────────────────────────────────────
 FROM registry.access.redhat.com/ubi9/python-311:latest AS builder
@@ -20,27 +20,30 @@ FROM registry.access.redhat.com/ubi9/python-311:latest AS builder
 USER 0
 WORKDIR /build
 
-# Copy project files
-COPY pyproject.toml README.md LICENSE ./
-COPY src/ src/
-
 # Build arg: set to "1" to include sentence-transformers (adds ~500MB)
 ARG INSTALL_SEMANTIC=0
 
-# Install the package into /opt/app-root (UBI9's default prefix)
-# so both lib/ and lib64/ end up in the right place for Python.
-RUN if [ "$INSTALL_SEMANTIC" = "1" ]; then \
+# Layer 1: Install dependencies only (cached unless pyproject.toml changes)
+COPY pyproject.toml README.md LICENSE ./
+RUN mkdir -p src/semantic_claw_router && \
+    echo '__version__ = "0.0.0"' > src/semantic_claw_router/__init__.py && \
+    if [ "$INSTALL_SEMANTIC" = "1" ]; then \
       pip install --no-cache-dir --prefix=/opt/app-root ".[semantic]"; \
     else \
       pip install --no-cache-dir --prefix=/opt/app-root .; \
     fi
 
+# Layer 2: Install actual app code (fast — only copies source, deps cached above)
+COPY src/ src/
+RUN pip install --no-cache-dir --no-deps --prefix=/opt/app-root .
+
 # ── Stage 2: Runtime ───────────────────────────────────────────────
 FROM registry.access.redhat.com/ubi9/python-311:latest AS runtime
 
-LABEL org.opencontainers.image.title="Semantic Claw Router" \
+LABEL org.opencontainers.image.title="Semantic Claw Router v0.2 (Athena)" \
       org.opencontainers.image.description="Intelligent LLM request router — mixture-of-models at the system level" \
       org.opencontainers.image.source="https://github.com/cnuland/semantic-claw-router" \
+      org.opencontainers.image.version="0.2.0" \
       org.opencontainers.image.licenses="Apache-2.0"
 
 WORKDIR /app
