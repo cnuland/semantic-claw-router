@@ -39,6 +39,7 @@ data:
         supports_tools: true
         supports_streaming: true
         supports_reasoning: true
+        supports_vision: true
         reasoning_effort: "high"
 
     # ── Tier → Model Mapping ─────────────────────────────────────────────

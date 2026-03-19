@@ -16,9 +16,11 @@ calling format, giving the model clean tool history it can continue from.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import logging
+import re
 import time
 from typing import Any, AsyncIterator
 
@@ -84,6 +86,42 @@ def _unpack_tool_call_id(tool_call_id: str) -> tuple[str | None, str | None]:
     return gemini_fc_id, thought_sig
 
 
+def _image_url_to_gemini_part(image_url: dict[str, Any]) -> dict[str, Any] | None:
+    """Convert an OpenAI image_url block to a Gemini inlineData part.
+
+    Handles both data URIs (data:image/jpeg;base64,...) and HTTP URLs.
+    HTTP URLs are converted to Gemini fileData references.
+    """
+    url = image_url.get("url", "")
+    if not url:
+        return None
+
+    # Data URI: extract mime type and base64 data directly
+    data_uri_match = re.match(r"^data:(image/[^;]+);base64,(.+)$", url, re.DOTALL)
+    if data_uri_match:
+        mime_type = data_uri_match.group(1)
+        b64_data = data_uri_match.group(2)
+        return {"inlineData": {"mimeType": mime_type, "data": b64_data}}
+
+    # HTTP(S) URL: fetch and inline the image
+    if url.startswith(("http://", "https://")):
+        try:
+            resp = httpx.get(url, timeout=15, follow_redirects=True)
+            if resp.status_code == 200:
+                mime_type = resp.headers.get("content-type", "image/jpeg").split(";")[0]
+                b64_data = base64.b64encode(resp.content).decode()
+                logger.info("Fetched image from URL: %s (%d bytes)", url[:80], len(resp.content))
+                return {"inlineData": {"mimeType": mime_type, "data": b64_data}}
+            else:
+                logger.warning("Failed to fetch image URL %s: HTTP %d", url[:80], resp.status_code)
+        except Exception as e:
+            logger.warning("Failed to fetch image URL %s: %s", url[:80], e)
+        return None
+
+    logger.warning("Unsupported image URL format: %s", url[:80])
+    return None
+
+
 def _openai_to_gemini_messages(messages: list[dict[str, Any]]) -> tuple[list[dict], str | None]:
     """Convert OpenAI message format to Gemini format.
 
@@ -114,12 +152,18 @@ def _openai_to_gemini_messages(messages: list[dict[str, Any]]) -> tuple[list[dic
         role = msg.get("role", "user")
         raw_content = msg.get("content", "")
 
-        # Normalize content: OpenAI format allows both string and list of parts
+        # Extract image parts from list-format content
+        image_parts: list[dict] = []
         if isinstance(raw_content, list):
             content = " ".join(
                 p.get("text", "") for p in raw_content
                 if isinstance(p, dict) and p.get("type") == "text"
             )
+            for p in raw_content:
+                if isinstance(p, dict) and p.get("type") == "image_url":
+                    gemini_part = _image_url_to_gemini_part(p.get("image_url", {}))
+                    if gemini_part:
+                        image_parts.append(gemini_part)
         elif isinstance(raw_content, str):
             content = raw_content
         else:
@@ -196,7 +240,13 @@ def _openai_to_gemini_messages(messages: list[dict[str, Any]]) -> tuple[list[dic
             if gemini_fc_id:
                 # Native Gemini functionResponse format
                 try:
-                    response_data = json.loads(tool_content)
+                    parsed = json.loads(tool_content)
+                    # Gemini requires response to be a Struct (dict/object).
+                    # Wrap non-dict values so they're valid.
+                    if isinstance(parsed, dict):
+                        response_data = parsed
+                    else:
+                        response_data = {"result": parsed}
                 except (json.JSONDecodeError, TypeError):
                     response_data = {"result": tool_content}
 
@@ -239,6 +289,9 @@ def _openai_to_gemini_messages(messages: list[dict[str, Any]]) -> tuple[list[dic
             for part in content:
                 if isinstance(part, dict) and part.get("type") == "text":
                     parts.append({"text": part["text"]})
+
+        # Append any image parts extracted from content blocks
+        parts.extend(image_parts)
 
         if parts:
             if contents and contents[-1]["role"] == gemini_role:

@@ -97,6 +97,17 @@ class SemanticRouter:
             return " ".join(parts) if parts else None
         return str(content)
 
+    @staticmethod
+    def _has_image_content(body: dict[str, Any]) -> bool:
+        """Check if any message contains image_url content blocks."""
+        for msg in body.get("messages", []):
+            content = msg.get("content")
+            if isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "image_url":
+                        return True
+        return False
+
     def _parse_request(self, body: dict[str, Any]) -> ParsedRequest:
         """Parse an OpenAI-format chat completion request."""
         messages = []
@@ -228,6 +239,18 @@ class SemanticRouter:
                     target_model.name, tool_model.name,
                 )
                 target_model = tool_model
+
+        # ── Stage 5.6: Vision override ──
+        if self._has_image_content(body) and not target_model.supports_vision:
+            vision_model = next(
+                (m for m in self.config.models if m.supports_vision), None
+            )
+            if vision_model:
+                logger.info(
+                    "Image content detected, overriding %s → %s",
+                    target_model.name, vision_model.name,
+                )
+                target_model = vision_model
 
         # ── Stage 6: Context compression ──
         compression_stats = {"compressed": False}
@@ -393,11 +416,11 @@ class SemanticRouter:
             weighted_sum += weight * raw_score
 
         boundaries = self.config.fast_path.tier_boundaries
-        if weighted_sum < boundaries.get("simple", 0.0):
+        if weighted_sum < boundaries.get("simple", -0.02):
             tier = ComplexityTier.SIMPLE
-        elif weighted_sum < boundaries.get("medium", 0.3):
+        elif weighted_sum < boundaries.get("medium", 0.04):
             tier = ComplexityTier.MEDIUM
-        elif weighted_sum < boundaries.get("complex", 0.5):
+        elif weighted_sum < boundaries.get("complex", 0.12):
             tier = ComplexityTier.COMPLEX
         else:
             tier = ComplexityTier.REASONING
@@ -517,6 +540,18 @@ class SemanticRouter:
                     target_model.name, tool_model.name,
                 )
                 target_model = tool_model
+
+        # ── Stage 5.6: Vision override ──
+        if self._has_image_content(body) and not target_model.supports_vision:
+            vision_model = next(
+                (m for m in self.config.models if m.supports_vision), None
+            )
+            if vision_model:
+                logger.info(
+                    "Image content detected, overriding %s → %s",
+                    target_model.name, vision_model.name,
+                )
+                target_model = vision_model
 
         # ── Stage 6: Context compression ──
         if self.config.compression.enabled:

@@ -1,4 +1,4 @@
-"""Fast-path pre-classifier — 14-dimension weighted scoring.
+"""Fast-path pre-classifier — 15-dimension weighted scoring.
 
 Inspired by ClawRouter (https://github.com/BlockRunAI/ClawRouter).
 Original concept by BlockRun under MIT License.
@@ -150,15 +150,15 @@ def _count_matches(pattern: re.Pattern, text: str) -> int:
 def _score_token_count(request: ParsedRequest) -> float:
     """Score based on estimated token count. Short → negative, long → positive."""
     tokens = request.estimated_tokens
-    if tokens < 50:
+    if tokens < 10:
         return -0.8
-    if tokens < 100:
+    if tokens < 30:
         return -0.4
-    if tokens < 300:
+    if tokens < 80:
         return 0.0
-    if tokens < 1000:
+    if tokens < 200:
         return 0.3
-    if tokens < 3000:
+    if tokens < 1000:
         return 0.6
     return 0.9
 
@@ -191,6 +191,10 @@ def _score_technical_terms(request: ParsedRequest) -> float:
     if not text:
         return 0.0
     count = _count_matches(_TECHNICAL_KEYWORDS, text)
+    if count >= 3:
+        return 1.0
+    if count >= 2:
+        return 0.7
     density = count / max(len(text.split()), 1)
     return min(density * 12.0, 1.0)
 
@@ -229,7 +233,7 @@ def _score_question_complexity(request: ParsedRequest) -> float:
 def _score_imperative_verbs(request: ParsedRequest) -> float:
     text = request.user_messages_text
     count = _count_matches(_IMPERATIVE_KEYWORDS, text)
-    return min(count * 0.25, 1.0)
+    return min(count * 0.4, 1.0)
 
 
 def _score_constraints(request: ParsedRequest) -> float:
@@ -318,7 +322,7 @@ def classify_fast_path(
     request: ParsedRequest,
     config: FastPathConfig,
 ) -> ClassificationResult | None:
-    """Run the 14-dimension fast-path classifier.
+    """Run the 15-dimension fast-path classifier.
 
     Returns ClassificationResult if confidence is above threshold,
     or None if the request is ambiguous and needs full classification.

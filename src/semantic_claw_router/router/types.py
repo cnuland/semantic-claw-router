@@ -107,6 +107,7 @@ class ModelBackend:
     supports_tools: bool = True
     supports_streaming: bool = True
     supports_reasoning: bool = False
+    supports_vision: bool = False
     reasoning_effort: str = "medium"  # low, medium, high
 
 

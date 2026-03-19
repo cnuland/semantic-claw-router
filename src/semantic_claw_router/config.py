@@ -20,16 +20,16 @@ class FastPathConfig:
     enabled: bool = True
     confidence_threshold: float = 0.7
     weights: dict[str, float] = field(default_factory=lambda: {
-        "token_count": 0.08,
-        "code_presence": 0.15,
+        "token_count": 0.05,
+        "code_presence": 0.12,
         "reasoning_markers": 0.18,
-        "technical_terms": 0.10,
+        "technical_terms": 0.14,
         "creative_markers": 0.05,
         "simple_indicators": 0.08,
-        "multi_step_patterns": 0.12,
-        "question_complexity": 0.05,
-        "imperative_verbs": 0.03,
-        "constraint_indicators": 0.04,
+        "multi_step_patterns": 0.10,
+        "question_complexity": 0.04,
+        "imperative_verbs": 0.08,
+        "constraint_indicators": 0.06,
         "output_format": 0.03,
         "reference_complexity": 0.02,
         "negation_complexity": 0.01,
@@ -37,9 +37,9 @@ class FastPathConfig:
         "agentic_task": 0.04,
     })
     tier_boundaries: dict[str, float] = field(default_factory=lambda: {
-        "simple": 0.0,
-        "medium": 0.3,
-        "complex": 0.5,
+        "simple": -0.02,
+        "medium": 0.04,
+        "complex": 0.12,
     })
     tier_to_model: dict[str, str] = field(default_factory=dict)
 
@@ -248,6 +248,7 @@ class RouterConfig:
                 supports_tools=m.get("supports_tools", True),
                 supports_streaming=m.get("supports_streaming", True),
                 supports_reasoning=m.get("supports_reasoning", False),
+                supports_vision=m.get("supports_vision", False),
                 reasoning_effort=m.get("reasoning_effort", "medium"),
             ))
 
